@@ -9,7 +9,7 @@ const processController = require('./controllers/processController');
 const {aiFeatureRequest,aiReview} = require('./controllers/AI_support');
 
 const corsOptions = {
-  origin: "http://localhost:5173", 
+  origin: ["http://localhost:5173","https://codeg-backend-yh3x.onrender.com" ],
   methods: ["GET", "POST", "PUT", "DELETE"], 
   credentials: true,
 };
@@ -99,7 +99,7 @@ app.post("/ai-feature", async (req, res) => {
     }
 });
 
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Compiler Service listening on port ${PORT}`));
 
 app.use(errorMiddleware); 
