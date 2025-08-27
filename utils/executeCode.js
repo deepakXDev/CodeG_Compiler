@@ -15,6 +15,21 @@ function executeCode(language, sourceFile, inputFile, outputFile, timeLimit, mem
       compileCmd = spawn('g++', [sourceFile, '-o', exeFile], {
         shell: true
       });
+      
+      //Fix: Add proper error handling for compilation:
+      let compileStderr = '';
+  compileCmd.stderr.on('data', (data) => {
+    compileStderr += data.toString();
+  });
+
+  compileCmd.on('error', (error) => {
+    return resolve({
+      stdout: '',
+      stderr: `Compilation error: ${error.message}`,
+      code: 1,
+    });
+  });
+
 
       compileCmd.on('close', (code) => {
         if (code !== 0) {
@@ -26,8 +41,25 @@ function executeCode(language, sourceFile, inputFile, outputFile, timeLimit, mem
         }
 
         // Execution step
-        const runCmd = process.platform === 'win32' ? exeFile : `./${path.basename(exeFile)}`;
-        runExecutable(runCmd, inputFile, outputFile, timeLimit, resolve);
+        // const runCmd = process.platform === 'win32' ? exeFile : `./${path.basename(exeFile)}`;
+        //Above -->Error: as exeFile is not./, it is at "tempFolder".. (Keep full filePath)
+
+        const runCmd = exeFile;  // works for both Linux and Windows
+
+
+        // runExecutable(runCmd, inputFile, outputFile, timeLimit, resolve);
+        
+        // runExecutable(runCmd, inputFile, outputFile, timeLimit, (result) => {
+        // // ✅ cleanup here, after runExecutable finished
+        //   if (fs.existsSync(exeFile)) {
+        //     try { fs.unlinkSync(exeFile); } catch (e) { console.error("cleanup failed", e); }
+        //   }
+        //   resolve(result); // <-- settle the outer Promise
+        // });
+
+         // ✅ Pass exeFile as cleanup target
+      runExecutable(runCmd, inputFile, outputFile, timeLimit, resolve, [], exeFile)
+
       });
     } else if (language === 'python') {
       const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
@@ -42,7 +74,7 @@ function executeCode(language, sourceFile, inputFile, outputFile, timeLimit, mem
   });
 }
 
-function runExecutable(cmd, inputFile, outputFile, timeLimit, resolve, args = []) {
+function runExecutable(cmd, inputFile, outputFile, timeLimit, resolve, args = [],cleanupFile = null) {
   const process = spawn(cmd, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false
@@ -51,12 +83,25 @@ function runExecutable(cmd, inputFile, outputFile, timeLimit, resolve, args = []
   let timedOut = false;
   const timeout = setTimeout(() => {
     timedOut = true;
-    process.kill();
+    // process.kill();
+    process.kill('SIGKILL');
   }, timeLimit);
 
-  const input = fs.readFileSync(inputFile);
-  process.stdin.write(input);
-  process.stdin.end();
+  // const input = fs.readFileSync(inputFile);
+  // process.stdin.write(input);
+  // process.stdin.end();
+
+ // Handle stdin writing with proper error handling
+  try {
+    const input = fs.readFileSync(inputFile);
+    process.stdin.write(input);
+    process.stdin.end();
+  } catch (error) {
+    console.error('Error writing to stdin:', error);
+    process.kill();
+    clearTimeout(timeout);
+    return resolve({ stdout: '', stderr: 'Input error', code: -1 });
+  }
 
   let stdout = '';
   let stderr = '';
@@ -71,11 +116,30 @@ function runExecutable(cmd, inputFile, outputFile, timeLimit, resolve, args = []
 
   process.on('close', (code) => {
     clearTimeout(timeout);
+
+    // ✅ Cleanup compiled executable if provided
+    if (cleanupFile && fs.existsSync(cleanupFile)) {
+      try {
+        fs.unlinkSync(cleanupFile);
+      } catch (err) {
+        console.error("Cleanup failed:", err);
+      }
+    }
+
+
     if (timedOut) {
       return resolve({ stdout: '', stderr: 'Time Limit Exceeded', code: -1 });
     }
-    fs.writeFileSync(outputFile, stdout);
-    resolve({ stdout, stderr, code });
+    // fs.writeFileSync(outputFile, stdout);
+    // resolve({ stdout, stderr, code });
+
+     try {
+      fs.writeFileSync(outputFile, stdout);
+      resolve({ stdout, stderr, code });
+    } catch (error) {
+      console.error('Error writing output file:', error);
+      resolve({ stdout, stderr: `Output file error: ${error.message}`, code: -1 });
+    }
   });
 }
 

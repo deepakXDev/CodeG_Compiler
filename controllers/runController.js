@@ -56,7 +56,7 @@ exports.runSampleTest = async (req, res, next) => {
     if (req.files?.["sourceCode"]?.[0]) {
       sourceFilePath = req.files["sourceCode"][0].path;
     } else if (sourceCode) {
-      const fileName = `${uuidv4()}.${language}`;
+      const fileName = `${uuidv4()}.${language}`; //directly using language..as way to create sourceCode_type**
       sourceFilePath = path.resolve(tempDir, fileName);
       fs.writeFileSync(sourceFilePath, sourceCode);
     } else {

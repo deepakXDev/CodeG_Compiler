@@ -9,7 +9,7 @@ const processController = require('./controllers/processController');
 const {aiFeatureRequest,aiReview} = require('./controllers/AI_support');
 
 const corsOptions = {
-  origin: ["http://localhost:5173","https://codeg-backend-yh3x.onrender.com" ],
+  origin: ["http://localhost:5173","https://codeg-backend-yh3x.onrender.com","https://code-g-frontend-nine.vercel.app" ],
   methods: ["GET", "POST", "PUT", "DELETE"], 
   credentials: true,
 };
