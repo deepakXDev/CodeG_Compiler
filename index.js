@@ -33,7 +33,7 @@ app.post('/process-submission', processController.processSubmission);
 app.post('/submission/run-sample',
   upload.fields([
     { name: "sourceCode", maxCount: 1 }, //sourceCode->fieldName in multer (file.filedName)
-]), runController.runSampleTest);
+]), runController.runCode);
 
 app.post("/review", async (req, res) => {
     try {
