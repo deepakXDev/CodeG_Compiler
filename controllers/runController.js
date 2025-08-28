@@ -1,8 +1,10 @@
 const fs = require('fs');
+const axios=require('axios');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const executeCode = require('../utils/executeCode');
+const {executeCode} = require('../utils/executeCode');
 const ErrorHandler = require("../middlewares/errorMiddleware");
+const {compareTestCase}=require("../utils/comparison");
 // const Problem = require("../models/Problem");
 
 // function compareTestCase(expected, actual) {
@@ -13,42 +15,6 @@ const TEMP_DIR = path.resolve(process.cwd(), "temp");
 const TIMEOUT = 3000; // 3 seconds
 const MEMORY_LIMIT = 128; // 128 MB
 
-
-function normalizeOutput(outputStr) {
-  const cleanStr = outputStr.replace(/\r/g, "").trim();
-
-  try {
-    return JSON.parse(cleanStr);
-  } catch (err) {
-    const tokens = cleanStr.split(/\s+/).map((token) => {
-      if (!isNaN(token)) return Number(token); // number
-      if (token === "true") return true;
-      if (token === "false") return false;
-      return token; // raw string
-    });
-    return tokens.length === 1 ? tokens[0] : tokens;
-  }
-}
-
-function compareTestCase(expectedStr, rawOutput) {
-  let expected, output;
-
-  try {
-    expected = normalizeOutput(expectedStr);
-  } catch (e) {
-    console.error("Invalid expected JSON string:", expectedStr);
-    return false;
-  }
-
-  try {
-    output = normalizeOutput(rawOutput);
-  } catch (e) {
-    console.error("Invalid output format:", rawOutput);
-    return false;
-  }
-
-  return deepEqual(output, expected);
-}
 
 const ensureTempDir = () => {
   if (!fs.existsSync(TEMP_DIR)) {
@@ -127,13 +93,23 @@ exports.runCode = async (req, res, next) => {
     }
 
     // --- Flow 2: Run against Sample Test Cases ---
-    if (problemId) {
-      const problem = await Problem.findById(problemId);
-      if (!problem) {
-        return next(new ErrorHandler("Problem not found", 404));
+    // if (problemId) {
+      // const problem = await Problem.findById(problemId);
+     if (problemId) {
+      // ✅ CHANGE: Instead of a DB call, make an API call to the backend
+      let problemData;
+      try {
+        const backendUrl = `${process.env.BACKEND_URL}/problems/id/${problemId}`;
+        const response = await axios.get(backendUrl);
+        problemData = response.data.data; // Note the nested .data structure
+      } catch (apiError) {
+        // Handle cases where the backend is down or the problem doesn't exist
+        const statusCode = apiError.response ? apiError.response.status : 500;
+        const message = apiError.response ? apiError.response.data.message : "Cannot connect to backend service";
+        return next(new ErrorHandler(message, statusCode));
       }
 
-      const sampleCases = problem.testCases.filter((tc) => tc.isSample);
+      const sampleCases = problemData.testCases.filter((tc) => tc.isSample);
       if (sampleCases.length === 0) {
         return res.status(200).json({
           message: "No sample test cases found for this problem.",

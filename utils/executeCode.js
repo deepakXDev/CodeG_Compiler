@@ -9,9 +9,9 @@ function executeCode(language, sourceFile, inputFile, outputFile, timeLimit, mem
     const outputExt = process.platform === 'win32' ? '.exe' : '.out';
     const exeFile = sourceFile.replace(path.extname(sourceFile), outputExt);
     
-    if (language === 'cpp') {
-      
-      const compile = spawn('g++', [sourceFile, '-o', exeFile]);
+   if (language === 'c' || language === 'cpp') {
+      const compiler = language === 'c' ? 'gcc' : 'g++';
+      const compile = spawn(compiler, [sourceFile, '-o', exeFile]);
       let compileStderr = '';
       compile.stderr.on('data', (data) => { compileStderr += data; });
 
@@ -19,15 +19,14 @@ function executeCode(language, sourceFile, inputFile, outputFile, timeLimit, mem
         if (code !== 0) {
           return resolve({ stdout: '', stderr: `Compilation Failed:\n${compileStderr}`, code });
         }
-        // CHANGE 1: Set execute permissions for the compiled file on Linux/macOS
         if (process.platform !== 'win32') {
           fs.chmodSync(exeFile, 0o755);
-        } 
+        }
         runExecutable(exeFile, [], inputFile, outputFile, timeLimit, memoryLimit, resolve, exeFile);
       });
 
       compile.on('error', (err) => {
-        resolve({ stdout: '', stderr: `Compiler not found or failed to start: ${err.message}`, code: 1 });
+        resolve({ stdout: '', stderr: `Compiler (${compiler}) not found or failed to start: ${err.message}`, code: 1 });
       });
 
     } else if (language === 'java') {

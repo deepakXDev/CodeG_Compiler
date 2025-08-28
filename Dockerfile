@@ -5,7 +5,7 @@ FROM node:18-alpine
 WORKDIR /app
 
 # Install dependencies for native modules
-RUN apk update && apk add --no-cache g++ gcc make python3 nodejs
+RUN apk update && apk add --no-cache g++ gcc make python3 nodejs openjdk17
 
 # Copy everything except ignored files
 COPY . .
