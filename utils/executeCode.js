@@ -22,7 +22,7 @@ function executeCode(language, sourceFile, inputFile, outputFile, timeLimit, mem
         if (process.platform !== 'win32') {
           fs.chmodSync(exeFile, 0o755);
         }
-        runExecutable(exeFile, [], inputFile, outputFile, timeLimit, memoryLimit, resolve, exeFile);
+        runExecutable(exeFile, [], inputFile, outputFile, timeLimit, memoryLimit, resolve, [exeFile]);
       });
 
       compile.on('error', (err) => {
@@ -31,28 +31,57 @@ function executeCode(language, sourceFile, inputFile, outputFile, timeLimit, mem
 
     } else if (language === 'java') {
       
+      try {
+        const sourceCode = fs.readFileSync(sourceFile, 'utf8');
+        
+        // SIMPLE FIX: Find the class name in the code to rename the file.
+        // This ensures the .java filename matches the class name, which Java requires.
+        const classNameMatch = sourceCode.match(/class\s+([A-Za-z_][A-Za-z0-9_]*)/);
+        if (!classNameMatch || !classNameMatch[1]) {
+          return resolve({ stdout: '', stderr: 'Could not find a class declaration in the Java source.', code: 1 });
+        }
+        
+        const mainClassName = classNameMatch[1];
+        const originalDir = path.dirname(sourceFile);
+        const newSourcePath = path.join(originalDir, `${mainClassName}.java`);
+
+        // Rename the original file (e.g., uuid.java -> Main.java)
+        fs.renameSync(sourceFile, newSourcePath);
+        sourceFile = newSourcePath; // Use the new, correctly named file from now on.
+
+      } catch (err) {
+        return resolve({ stdout: '', stderr: `Failed to preprocess Java file: ${err.message}`, code: 1 });
+      }
+      
       const compile = spawn('javac', [sourceFile]);
       let compileStderr = '';
       compile.stderr.on('data', (data) => { compileStderr += data; });
 
       compile.on('close', (code) => {
         if (code !== 0) {
+          if (fs.existsSync(sourceFile)) fs.unlinkSync(sourceFile);
           return resolve({ stdout: '', stderr: `Compilation Failed:\n${compileStderr}`, code });
         }
         
         const className = path.basename(sourceFile, '.java');
         const classFileDir = path.dirname(sourceFile);
+
+          const classFilePath = path.join(classFileDir, `${className}.class`);
+
+        const javaCmd = 'java';
+        const javaArgs = ['-cp', classFileDir, className];
         
-        const javaCmd = `java -cp ${classFileDir} ${className}`;
-        runExecutable(javaCmd, [], inputFile, outputFile, timeLimit, memoryLimit, resolve, `${classFileDir}/${className}.class`);
+        runExecutable(javaCmd, javaArgs, inputFile, outputFile, timeLimit, memoryLimit, resolve, [sourceFile, classFilePath]);
       });
 
-       compile.on('error', (err) => {
+      compile.on('error', (err) => {
         resolve({ stdout: '', stderr: `JDK not found or failed to start: ${err.message}`, code: 1 });
       });
-
-    } else if (language === 'python') {
-      runExecutable('python3', [sourceFile], inputFile, outputFile, timeLimit, memoryLimit, resolve);
+    } else if (language === 'python' || language === 'py') {
+      // CHANGE 2: Support 'py' as an alias for python.
+      // CHANGE 3: Use 'python' on Windows and 'python3' on other systems.
+      const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+      runExecutable(pythonCmd, [sourceFile], inputFile, outputFile, timeLimit, memoryLimit, resolve);
     } else if (language === 'javascript') {
       runExecutable('node', [sourceFile], inputFile, outputFile, timeLimit, memoryLimit, resolve);
     } else {
@@ -62,24 +91,24 @@ function executeCode(language, sourceFile, inputFile, outputFile, timeLimit, mem
 }
 
 
-function runExecutable(command, args, inputFile, outputFile, timeLimit, memoryLimit, resolve, cleanupFile = null) {
-  // CHANGE 2: Use shell commands for resource limiting (ulimit on Linux)
+function runExecutable(command, args, inputFile, outputFile, timeLimit, memoryLimit, resolve, cleanupFiles = [], spawnOptions = {}) {
   let cmd, cmdArgs;
   const memoryLimitKB = memoryLimit * 1024; 
 
   if (process.platform === 'linux') {
-    const fullCommand = [command, ...args].join(' ');
-    cmd = '/bin/sh';
-    cmdArgs = ['-c', `ulimit -v ${memoryLimitKB} && ${fullCommand}`];
-  } else {
+    const commandAndArgs = [command, ...args];
+    const escapedFullCommand = commandAndArgs.map(arg => `'${arg.replace(/'/g, "'\\''")}'`).join(' ');
     
+    cmd = '/bin/sh';
+    cmdArgs = ['-c', `ulimit -v ${memoryLimitKB}; exec ${escapedFullCommand}`];
+  } else {
     cmd = command;
     cmdArgs = args;
   }
 
   const child = spawn(cmd, cmdArgs, {
     stdio: ['pipe', 'pipe', 'pipe'],
-    shell: process.platform === 'linux', 
+    ...spawnOptions 
   });
 
   let timedOut = false;
@@ -88,7 +117,6 @@ function runExecutable(command, args, inputFile, outputFile, timeLimit, memoryLi
     child.kill('SIGKILL'); 
   }, timeLimit);
 
-  
   const inputStream = fs.createReadStream(inputFile);
   inputStream.pipe(child.stdin);
 
@@ -97,16 +125,25 @@ function runExecutable(command, args, inputFile, outputFile, timeLimit, memoryLi
   child.stdout.on('data', (data) => { stdout += data; });
   child.stderr.on('data', (data) => { stderr += data; });
 
-  // CHANGE 3: Add a proper 'error' handler to catch ENOENT and other spawn errors
+    const cleanup = () => {
+      cleanupFiles.forEach(file => {
+      if (file && fs.existsSync(file)) {
+        fs.unlinkSync(file);
+      }
+    });
+  };
+
   child.on('error', (err) => {
     clearTimeout(timeout);
-    if (cleanupFile && fs.existsSync(cleanupFile)) fs.unlinkSync(cleanupFile);
+    // if (cleanupFile && fs.existsSync(cleanupFile)) fs.unlinkSync(cleanupFile);
+    cleanup();
     return resolve({ stdout: '', stderr: `Execution failed to start: ${err.message}`, code: 1 });
   });
 
   child.on('close', (code, signal) => {
     clearTimeout(timeout);
-    if (cleanupFile && fs.existsSync(cleanupFile)) fs.unlinkSync(cleanupFile);
+    // if (cleanupFile && fs.existsSync(cleanupFile)) fs.unlinkSync(cleanupFile);
+    cleanup();
 
     if (timedOut) {
       return resolve({ stdout, stderr: 'Time Limit Exceeded', code: -1, signal: 'SIGKILL' });
@@ -125,4 +162,4 @@ function runExecutable(command, args, inputFile, outputFile, timeLimit, memoryLi
   });
 }
 
-module.exports = { executeCode }; 
+module.exports = { executeCode };
