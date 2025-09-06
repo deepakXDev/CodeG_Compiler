@@ -5,30 +5,27 @@ const { v4: uuidv4 } = require('uuid');
 const {executeCode} = require('../utils/executeCode');
 const ErrorHandler = require("../middlewares/errorMiddleware");
 const {compareTestCase}=require("../utils/comparison");
-// const Problem = require("../models/Problem");
 
-// function compareTestCase(expected, actual) {
-//   return expected.trim() === actual.trim();
-// }
 
 const TEMP_DIR = path.resolve(process.cwd(), "temp");
-const TIMEOUT = 3000; // 3 seconds
+const TIMEOUT = 1000; // 1 seconds
 const MEMORY_LIMIT = 128; // 128 MB
 
-const sanitizeError = (stderr) => {
+
+const sanitizeError = (stderr, sourceFilePath) => {
   if (!stderr) return "";
-  
+
   let sanitized = stderr;
 
-  // Regex for Python/C++/Java file paths in quotes (e.g., File "C:\...\temp\...\file.cpp")
-  // The second group (") is correctly closed here.
-  const genericPathRegex = /(File\s+")[^"]*[\/\\]temp[\/\\][^"]*(")/g;
-  sanitized = sanitized.replace(genericPathRegex, '$1your_code$2');
+  if (sourceFilePath) {
+    // Replace the exact source file path with a generic name
+    const fileName = path.basename(sourceFilePath);
+    sanitized = sanitized.replaceAll(sourceFilePath, "your_code");
+  }
 
-  // Regex for Node.js/V8 stack traces (e.g., at /var/task/temp/some-uuid.js:5:9)
-  const nodePathRegex = /(\s+at\s+.*?\()[^)]*[\/\\]temp[\/\\][^"]*(\))/g;
-  sanitized = sanitized.replace(nodePathRegex, '$1your_code$2');
-  
+  // Fallback: remove any absolute temp paths, replace with 'your_code'
+  sanitized = sanitized.replace(/([A-Z]:)?[\/\\].*?[\/\\]temp[\/\\][^:\s]*/gi, "your_code");
+
   return sanitized;
 };
 
@@ -41,7 +38,7 @@ const ensureTempDir = () => {
 
 const createSourceFile = (req) => {
   const { language, sourceCode } = req.body;
-
+  
   if (req.files?.["sourceCode"]?.[0]) {
     return req.files["sourceCode"][0].path;
   }
@@ -62,6 +59,7 @@ const runSingleExecution = async (language, sourceFilePath, input) => {
   const inputFile = path.resolve(TEMP_DIR, `${uniqueId}_input.txt`);
   const outputFile = path.resolve(TEMP_DIR, `${uniqueId}_output.txt`);
   let output = "";
+  
 
   try {
     fs.writeFileSync(inputFile, input);
@@ -78,7 +76,7 @@ const runSingleExecution = async (language, sourceFilePath, input) => {
     if (fs.existsSync(outputFile)) {
       output = fs.readFileSync(outputFile, "utf8");
     }
-
+    
     return { output, ...result };
   } finally {
     // Ensure input and output files are cleaned up
@@ -89,6 +87,7 @@ const runSingleExecution = async (language, sourceFilePath, input) => {
 };
 
 exports.runCode = async (req, res, next) => {
+  
   ensureTempDir();
   let sourceFilePath = null;
 
@@ -105,7 +104,7 @@ exports.runCode = async (req, res, next) => {
       );
 
        if (result.stderr) {
-        result.stderr = sanitizeError(result.stderr);
+        result.stderr = sanitizeError(result.stderr,sourceFilePath);
       }
 
       return res.status(200).json({
@@ -149,7 +148,7 @@ exports.runCode = async (req, res, next) => {
         const passed = compareTestCase(testCase.output, result.output);
 
          if (result.stderr) {
-        result.stderr = sanitizeError(result.stderr);
+        result.stderr = sanitizeError(result.stderr, sourceFilePath);
       }
 
 
@@ -179,6 +178,7 @@ exports.runCode = async (req, res, next) => {
       )
     );
   } catch (err) {
+    console.error('[DEBUG] CRITICAL ERROR CAUGHT:', err);
     return next(err); // Pass error to the global error handler middleware
   } finally {
     // --- Universal Cleanup ---

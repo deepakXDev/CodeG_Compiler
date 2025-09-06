@@ -26,22 +26,23 @@ const getVerdict = (result, passed) => {
   return 'Accepted';
 };
 
-const sanitizeError = (stderr) => {
+const sanitizeError = (stderr, sourceFilePath) => {
   if (!stderr) return "";
-  
+
   let sanitized = stderr;
 
-  // Regex for Python/C++/Java file paths in quotes (e.g., File "C:\...\temp\...\file.cpp")
-  // The second group (") is correctly closed here.
-  const genericPathRegex = /(File\s+")[^"]*[\/\\]temp[\/\\][^"]*(")/g;
-  sanitized = sanitized.replace(genericPathRegex, '$1your_code$2');
+  if (sourceFilePath) {
+    // Replace the exact source file path with a generic name
+    const fileName = path.basename(sourceFilePath);
+    sanitized = sanitized.replaceAll(sourceFilePath, "your_code");
+  }
 
-  // Regex for Node.js/V8 stack traces (e.g., at /var/task/temp/some-uuid.js:5:9)
-  const nodePathRegex = /(\s+at\s+.*?\()[^)]*[\/\\]temp[\/\\][^"]*(\))/g;
-  sanitized = sanitized.replace(nodePathRegex, '$1your_code$2');
-  
+  // Fallback: remove any absolute temp paths, replace with 'your_code'
+  sanitized = sanitized.replace(/([A-Z]:)?[\/\\].*?[\/\\]temp[\/\\][^:\s]*/gi, "your_code");
+
   return sanitized;
 };
+
 
 
 exports.processSubmission = async (req, res) => {
@@ -49,11 +50,13 @@ exports.processSubmission = async (req, res) => {
     language,
     sourceCode,
     testCases,
-    timeLimit = 3000, // Default 3 seconds 
+    // timeLimit = 1000, // Default 1 seconds 
     memoryLimit = 128, // Default 128 MB
     callbackUrl,
     secretToken // For securing the callback
   } = req.body;
+  
+  const timeLimit=1000;  
 
   if (!language || !sourceCode || !testCases || !callbackUrl) {
     return res.status(400).json({ error: 'Missing required fields' });
@@ -113,7 +116,7 @@ exports.processSubmission = async (req, res) => {
         // Capture stderr for any compilation or runtime error.
         if (verdict === 'Compilation Error' || verdict === 'Runtime Error') {
           // errorDetails = result.stderr.trim();
-          errorDetails = sanitizeError(result.stderr);
+          errorDetails = sanitizeError(result.stderr,sourceFilePath);
         }
         break; // Stop on the first failed test case
       }

@@ -135,14 +135,12 @@ function runExecutable(command, args, inputFile, outputFile, timeLimit, memoryLi
 
   child.on('error', (err) => {
     clearTimeout(timeout);
-    // if (cleanupFile && fs.existsSync(cleanupFile)) fs.unlinkSync(cleanupFile);
     cleanup();
     return resolve({ stdout: '', stderr: `Execution failed to start: ${err.message}`, code: 1 });
   });
 
   child.on('close', (code, signal) => {
     clearTimeout(timeout);
-    // if (cleanupFile && fs.existsSync(cleanupFile)) fs.unlinkSync(cleanupFile);
     cleanup();
 
     if (timedOut) {
